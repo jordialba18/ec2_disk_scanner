@@ -1,0 +1,205 @@
+{
+  "Comment": "YARA agentless EC2 disk scanner — EBS snapshot → attach → scan → cleanup",
+  "StartAt": "ListVolumes",
+  "States": {
+    "ListVolumes": {
+      "Type": "Task",
+      "Resource": "${ListVolumesFunctionArn}",
+      "Parameters": {
+        "execution_id.$": "$$.Execution.Id"
+      },
+      "ResultPath": "$.list_result",
+      "Next": "CreateSnapshots",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "CreateSnapshots": {
+      "Type": "Map",
+      "ItemsPath": "$.list_result.volumes",
+      "ItemSelector": {
+        "volume_id.$": "$$.Map.Item.Value.volume_id",
+        "execution_id.$": "$$.Execution.Id"
+      },
+      "MaxConcurrency": 0,
+      "Iterator": {
+        "StartAt": "CreateSnapshot",
+        "States": {
+          "CreateSnapshot": {
+            "Type": "Task",
+            "Resource": "${CreateSnapshotFunctionArn}",
+            "Retry": [
+              {
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                "IntervalSeconds": 2,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.snapshots",
+      "Next": "WaitSnapshots"
+    },
+    "WaitSnapshots": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${CheckSnapshotFunctionArn}",
+        "Payload": {
+          "task_token.$": "$$.Task.Token",
+          "snapshots.$": "$.snapshots",
+          "execution_id.$": "$$.Execution.Id"
+        }
+      },
+      "HeartbeatSeconds": 900,
+      "TimeoutSeconds": 3600,
+      "ResultPath": "$.wait_snapshots_result",
+      "Next": "ScanVolumes",
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "ScanVolumes": {
+      "Type": "Map",
+      "ItemsPath": "$.snapshots",
+      "ItemSelector": {
+        "snapshot_id.$": "$$.Map.Item.Value.snapshot_id",
+        "volume_id.$": "$$.Map.Item.Value.volume_id",
+        "execution_id.$": "$$.Execution.Id"
+      },
+      "MaxConcurrency": 1,
+      "Iterator": {
+        "StartAt": "CreateVolume",
+        "States": {
+          "CreateVolume": {
+            "Type": "Task",
+            "Resource": "${CreateVolumeFunctionArn}",
+            "Retry": [
+              {
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "Next": "AttachVolume"
+          },
+          "AttachVolume": {
+            "Type": "Task",
+            "Resource": "${AttachVolumeFunctionArn}",
+            "Retry": [
+              {
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                "IntervalSeconds": 5,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "Next": "WaitVolumeAttached"
+          },
+          "WaitVolumeAttached": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+              "FunctionName": "${CheckVolumeAttachedFunctionArn}",
+              "Payload": {
+                "task_token.$": "$$.Task.Token",
+                "scan_volume_id.$": "$.scan_volume_id",
+                "volume_id.$": "$.volume_id",
+                "snapshot_id.$": "$.snapshot_id",
+                "execution_id.$": "$.execution_id"
+              }
+            },
+            "HeartbeatSeconds": 300,
+            "TimeoutSeconds": 600,
+            "ResultPath": "$.attach_result",
+            "Next": "MountAndScan",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "CleanupVolume"
+              }
+            ]
+          },
+          "MountAndScan": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Parameters": {
+              "FunctionName": "${RunScanFunctionArn}",
+              "Payload": {
+                "task_token.$": "$$.Task.Token",
+                "scan_volume_id.$": "$.scan_volume_id",
+                "volume_id.$": "$.volume_id",
+                "snapshot_id.$": "$.snapshot_id",
+                "execution_id.$": "$.execution_id"
+              }
+            },
+            "HeartbeatSeconds": 1800,
+            "TimeoutSeconds": 3600,
+            "ResultPath": "$.scan_result",
+            "Next": "CleanupVolume",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "ResultPath": "$.error",
+                "Next": "CleanupVolume"
+              }
+            ]
+          },
+          "CleanupVolume": {
+            "Type": "Task",
+            "Resource": "${CleanupFunctionArn}",
+            "Parameters": {
+              "scan_volume_id.$": "$.scan_volume_id",
+              "volume_id.$": "$.volume_id",
+              "snapshot_id.$": "$.snapshot_id",
+              "execution_id.$": "$.execution_id"
+            },
+            "Retry": [
+              {
+                "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                "IntervalSeconds": 10,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ],
+            "End": true
+          }
+        }
+      },
+      "ResultPath": "$.scan_results",
+      "Next": "GenerateReport"
+    },
+    "GenerateReport": {
+      "Type": "Task",
+      "Resource": "${GenerateReportFunctionArn}",
+      "Parameters": {
+        "execution_id.$": "$$.Execution.Id",
+        "scan_results.$": "$.scan_results"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "End": true
+    }
+  }
+}

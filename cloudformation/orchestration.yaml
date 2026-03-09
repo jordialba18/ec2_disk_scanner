@@ -1,0 +1,593 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "YARA Scanner — Lambda functions and Step Functions state machine"
+
+Parameters:
+  StackPrefix:
+    Type: String
+    Description: "Prefix for resource names (root stack name)"
+  ScannerASGName:
+    Type: String
+    Description: "Auto Scaling Group name for the scanner EC2 (used for instance discovery)"
+  LambdaRoleArn:
+    Type: String
+  SFNRoleArn:
+    Type: String
+  ResultsBucketName:
+    Type: String
+  GHCRSecretArn:
+    Type: String
+  GHCRImageURI:
+    Type: String
+  ScannerAZ:
+    Type: String
+  LambdaCodeBucket:
+    Type: String
+
+Resources:
+  # CloudWatch Log Groups
+  TriggerScanLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-trigger-scan"
+      RetentionInDays: 14
+
+  CreateSnapshotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-create-snapshot"
+      RetentionInDays: 14
+
+  CheckSnapshotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-check-snapshot"
+      RetentionInDays: 14
+
+  CreateVolumeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-create-volume"
+      RetentionInDays: 14
+
+  AttachVolumeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-attach-volume"
+      RetentionInDays: 14
+
+  CheckVolumeAttachedLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-check-volume-attached"
+      RetentionInDays: 14
+
+  RunScanLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-run-scan"
+      RetentionInDays: 14
+
+  CheckScanStatusLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-check-scan-status"
+      RetentionInDays: 14
+
+  CleanupLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-cleanup"
+      RetentionInDays: 14
+
+  GenerateReportLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackPrefix}-generate-report"
+      RetentionInDays: 14
+
+  SFNLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/states/${StackPrefix}-scanner"
+      RetentionInDays: 14
+
+  # Lambda Functions
+  TriggerScanFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: TriggerScanLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-trigger-scan"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/trigger_scan.zip
+      Environment:
+        Variables:
+          STATE_MACHINE_ARN: !Ref ScannerStateMachine
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  CreateSnapshotFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CreateSnapshotLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-create-snapshot"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/create_snapshot.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  CheckSnapshotFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CheckSnapshotLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-check-snapshot"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 840
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/check_snapshot.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  CreateVolumeFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CreateVolumeLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-create-volume"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/create_volume.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  AttachVolumeFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: AttachVolumeLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-attach-volume"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/attach_volume.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+          SCANNER_ASG_NAME: !Ref ScannerASGName
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  CheckVolumeAttachedFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CheckVolumeAttachedLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-check-volume-attached"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 840
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/check_volume_attached.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  RunScanFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: RunScanLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-run-scan"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 60
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/run_scan.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+          RESULTS_BUCKET: !Ref ResultsBucketName
+          GHCR_SECRET_ARN: !Ref GHCRSecretArn
+          GHCR_IMAGE_URI: !Ref GHCRImageURI
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  CheckScanStatusFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CheckScanStatusLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-check-scan-status"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 840
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/check_scan_status.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  CleanupFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: CleanupLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-cleanup"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 120
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/cleanup.zip
+      Environment:
+        Variables:
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  GenerateReportFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GenerateReportLogGroup
+    Properties:
+      FunctionName: !Sub "${StackPrefix}-generate-report"
+      Runtime: python3.12
+      Handler: handler.lambda_handler
+      Role: !Ref LambdaRoleArn
+      Timeout: 120
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: lambda/generate_report.zip
+      Environment:
+        Variables:
+          RESULTS_BUCKET: !Ref ResultsBucketName
+          SCANNER_AZ: !Ref ScannerAZ
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  # Step Functions State Machine
+  ScannerStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${StackPrefix}-scanner"
+      RoleArn: !Ref SFNRoleArn
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt SFNLogGroup.Arn
+      TracingConfiguration:
+        Enabled: true
+      DefinitionString: !Sub |
+        {
+          "Comment": "YARA agentless EC2 disk scanner",
+          "StartAt": "ListVolumes",
+          "States": {
+            "ListVolumes": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${TriggerScanFunction.Arn}",
+                "Payload": {
+                  "execution_id.$": "$$.Execution.Id",
+                  "action": "list_volumes"
+                }
+              },
+              "ResultSelector": {
+                "volumes.$": "$.Payload.volumes"
+              },
+              "ResultPath": "$.list_result",
+              "Next": "CreateSnapshots",
+              "Retry": [
+                {
+                  "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ]
+            },
+            "CreateSnapshots": {
+              "Type": "Map",
+              "ItemsPath": "$.list_result.volumes",
+              "ItemSelector": {
+                "volume_id.$": "$$.Map.Item.Value.volume_id",
+                "execution_id.$": "$$.Execution.Id"
+              },
+              "MaxConcurrency": 0,
+              "Iterator": {
+                "StartAt": "CreateSnapshot",
+                "States": {
+                  "CreateSnapshot": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${CreateSnapshotFunction.Arn}",
+                      "Payload.$": "$"
+                    },
+                    "ResultSelector": {
+                      "snapshot_id.$": "$.Payload.snapshot_id",
+                      "volume_id.$": "$.Payload.volume_id",
+                      "execution_id.$": "$.Payload.execution_id"
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                        "IntervalSeconds": 2,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "End": true
+                  }
+                }
+              },
+              "ResultPath": "$.snapshots",
+              "Next": "WaitSnapshots"
+            },
+            "WaitSnapshots": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+              "Parameters": {
+                "FunctionName": "${CheckSnapshotFunction.Arn}",
+                "Payload": {
+                  "task_token.$": "$$.Task.Token",
+                  "snapshots.$": "$.snapshots",
+                  "execution_id.$": "$$.Execution.Id"
+                }
+              },
+              "HeartbeatSeconds": 900,
+              "TimeoutSeconds": 3600,
+              "ResultPath": "$.wait_snapshots_result",
+              "Next": "ScanVolumes"
+            },
+            "ScanVolumes": {
+              "Type": "Map",
+              "ItemsPath": "$.snapshots",
+              "ItemSelector": {
+                "snapshot_id.$": "$$.Map.Item.Value.snapshot_id",
+                "volume_id.$": "$$.Map.Item.Value.volume_id",
+                "execution_id.$": "$$.Execution.Id"
+              },
+              "MaxConcurrency": 1,
+              "Iterator": {
+                "StartAt": "CreateVolume",
+                "States": {
+                  "CreateVolume": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${CreateVolumeFunction.Arn}",
+                      "Payload.$": "$"
+                    },
+                    "ResultSelector": {
+                      "scan_volume_id.$": "$.Payload.scan_volume_id",
+                      "snapshot_id.$": "$.Payload.snapshot_id",
+                      "volume_id.$": "$.Payload.volume_id",
+                      "execution_id.$": "$.Payload.execution_id"
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "Next": "AttachVolume",
+                    "Catch": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.error",
+                        "Next": "CleanupVolume"
+                      }
+                    ]
+                  },
+                  "AttachVolume": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${AttachVolumeFunction.Arn}",
+                      "Payload.$": "$"
+                    },
+                    "ResultSelector": {
+                      "scan_volume_id.$": "$.Payload.scan_volume_id",
+                      "snapshot_id.$": "$.Payload.snapshot_id",
+                      "volume_id.$": "$.Payload.volume_id",
+                      "execution_id.$": "$.Payload.execution_id",
+                      "instance_id.$": "$.Payload.instance_id"
+                    },
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "Next": "WaitVolumeAttached",
+                    "Catch": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.error",
+                        "Next": "CleanupVolume"
+                      }
+                    ]
+                  },
+                  "WaitVolumeAttached": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                    "Parameters": {
+                      "FunctionName": "${CheckVolumeAttachedFunction.Arn}",
+                      "Payload": {
+                        "task_token.$": "$$.Task.Token",
+                        "scan_volume_id.$": "$.scan_volume_id",
+                        "volume_id.$": "$.volume_id",
+                        "snapshot_id.$": "$.snapshot_id",
+                        "execution_id.$": "$.execution_id",
+                        "instance_id.$": "$.instance_id"
+                      }
+                    },
+                    "HeartbeatSeconds": 300,
+                    "TimeoutSeconds": 600,
+                    "ResultPath": "$.attach_result",
+                    "Next": "MountAndScan",
+                    "Catch": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.error",
+                        "Next": "CleanupVolume"
+                      }
+                    ]
+                  },
+                  "MountAndScan": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                    "Parameters": {
+                      "FunctionName": "${RunScanFunction.Arn}",
+                      "Payload": {
+                        "task_token.$": "$$.Task.Token",
+                        "scan_volume_id.$": "$.scan_volume_id",
+                        "volume_id.$": "$.volume_id",
+                        "snapshot_id.$": "$.snapshot_id",
+                        "execution_id.$": "$.execution_id",
+                        "instance_id.$": "$.instance_id"
+                      }
+                    },
+                    "HeartbeatSeconds": 1800,
+                    "TimeoutSeconds": 3600,
+                    "ResultPath": "$.scan_result",
+                    "Next": "CleanupVolume",
+                    "Catch": [
+                      {
+                        "ErrorEquals": ["States.ALL"],
+                        "ResultPath": "$.error",
+                        "Next": "CleanupVolume"
+                      }
+                    ]
+                  },
+                  "CleanupVolume": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${CleanupFunction.Arn}",
+                      "Payload": {
+                        "scan_volume_id.$": "$.scan_volume_id",
+                        "volume_id.$": "$.volume_id",
+                        "snapshot_id.$": "$.snapshot_id",
+                        "execution_id.$": "$.execution_id"
+                      }
+                    },
+                    "ResultPath": "$.cleanup_result",
+                    "Retry": [
+                      {
+                        "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+                        "IntervalSeconds": 10,
+                        "MaxAttempts": 3,
+                        "BackoffRate": 2
+                      }
+                    ],
+                    "End": true
+                  }
+                }
+              },
+              "ResultPath": "$.scan_results",
+              "Next": "GenerateReport"
+            },
+            "GenerateReport": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${GenerateReportFunction.Arn}",
+                "Payload": {
+                  "execution_id.$": "$$.Execution.Id",
+                  "scan_results.$": "$.scan_results"
+                }
+              },
+              "ResultSelector": {
+                "report_s3_key.$": "$.Payload.report_s3_key",
+                "total_volumes.$": "$.Payload.total_volumes",
+                "total_findings.$": "$.Payload.total_findings"
+              },
+              "Retry": [
+                {
+                  "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException"],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
+              ],
+              "End": true
+            }
+          }
+        }
+
+Outputs:
+  StateMachineArn:
+    Value: !Ref ScannerStateMachine
+    Export:
+      Name: !Sub "${AWS::StackName}-StateMachineArn"
+
+  TriggerScanFunctionArn:
+    Value: !GetAtt TriggerScanFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-TriggerScanFunctionArn"
+
+  TriggerScanFunctionName:
+    Value: !Ref TriggerScanFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-TriggerScanFunctionName"

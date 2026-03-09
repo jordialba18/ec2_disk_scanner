@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "YARA Scanner — Scanner EC2 launch template and ASG"
+
+Parameters:
+  StackPrefix:
+    Type: String
+    Description: "Prefix for resource names (root stack name)"
+  PrivateSubnetId:
+    Type: String
+  ScannerSecurityGroupId:
+    Type: String
+  ScannerInstanceProfileArn:
+    Type: String
+  InstanceType:
+    Type: String
+    Default: t3.medium
+  ScannerAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  ScannerLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "${StackPrefix}-lt"
+      LaunchTemplateData:
+        ImageId: !Ref ScannerAmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile:
+          Arn: !Ref ScannerInstanceProfileArn
+        SecurityGroupIds:
+          - !Ref ScannerSecurityGroupId
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs:
+              VolumeSize: 30
+              VolumeType: gp3
+              DeleteOnTermination: true
+              Encrypted: true
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            set -euxo pipefail
+
+            # Update and install dependencies
+            dnf update -y
+            dnf install -y docker nvme-cli ntfsprogs aws-cli python3-pip
+
+            # Enable and start Docker
+            systemctl enable docker
+            systemctl start docker
+
+            # Add ec2-user to docker group
+            usermod -aG docker ec2-user
+
+            # Ensure SSM agent is running (pre-installed on AL2023)
+            systemctl enable amazon-ssm-agent
+            systemctl start amazon-ssm-agent
+
+            # Create mount point directory
+            mkdir -p /mnt/scan
+
+            # Install ntfs-3g for Windows volume support
+            dnf install -y fuse ntfs-3g || true
+
+            # Signal completion
+            echo "YARA scanner EC2 userdata complete" >> /var/log/yara-scanner-init.log
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "${StackPrefix}-ec2"
+              - Key: Role
+                Value: ec2-disk-scanner
+              - Key: ManagedBy
+                Value: yara-scanner
+
+  ScannerASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "${StackPrefix}-asg"
+      MinSize: "1"
+      MaxSize: "1"
+      DesiredCapacity: "1"
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnetId
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ScannerLaunchTemplate
+        Version: !GetAtt ScannerLaunchTemplate.LatestVersionNumber
+      Tags:
+        - Key: Name
+          Value: !Sub "${StackPrefix}-ec2"
+          PropagateAtLaunch: true
+        - Key: Role
+          Value: ec2-disk-scanner
+          PropagateAtLaunch: true
+        - Key: ScannerStackName
+          Value: !Ref StackPrefix
+          PropagateAtLaunch: true
+        - Key: ManagedBy
+          Value: yara-scanner
+          PropagateAtLaunch: true
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+
+Outputs:
+  ScannerASGName:
+    Value: !Ref ScannerASG
+    Export:
+      Name: !Sub "${AWS::StackName}-ScannerASGName"
+
+  ScannerLaunchTemplateId:
+    Value: !Ref ScannerLaunchTemplate
+    Export:
+      Name: !Sub "${AWS::StackName}-ScannerLaunchTemplateId"

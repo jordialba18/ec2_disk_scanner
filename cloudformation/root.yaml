@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "YARA Scanner — Root stack orchestrating all nested stacks"
+
+Parameters:
+  GHCRImageURI:
+    Type: String
+    Description: "GHCR image URI for YARA scanner, e.g. ghcr.io/your-org/yara-scanner:latest"
+
+  ScannerInstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - m5.large
+      - m5.xlarge
+    Description: "Instance type for scanner EC2"
+
+  LambdaCodeBucket:
+    Type: String
+    Description: "S3 bucket containing Lambda deployment packages"
+
+  ScannerAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: "AMI ID for scanner EC2 (auto-resolves latest AL2023)"
+
+Resources:
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: vpc.yaml
+      TimeoutInMinutes: 30
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  StorageStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: storage.yaml
+      Parameters:
+        StackPrefix: !Ref AWS::StackName
+      TimeoutInMinutes: 15
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - StorageStack
+    Properties:
+      TemplateURL: iam.yaml
+      Parameters:
+        StackPrefix: !Ref AWS::StackName
+        ResultsBucketArn: !GetAtt StorageStack.Outputs.ResultsBucketArn
+        GHCRSecretArn: !GetAtt StorageStack.Outputs.GHCRSecretArn
+      TimeoutInMinutes: 15
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  ScannerStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - VPCStack
+      - IAMStack
+    Properties:
+      TemplateURL: scanner.yaml
+      Parameters:
+        StackPrefix: !Ref AWS::StackName
+        PrivateSubnetId: !GetAtt VPCStack.Outputs.PrivateSubnetId
+        ScannerSecurityGroupId: !GetAtt VPCStack.Outputs.ScannerSecurityGroupId
+        ScannerInstanceProfileArn: !GetAtt IAMStack.Outputs.ScannerInstanceProfileArn
+        InstanceType: !Ref ScannerInstanceType
+        ScannerAmiId: !Ref ScannerAmiId
+      TimeoutInMinutes: 20
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+  OrchestrationStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IAMStack
+      - StorageStack
+      - VPCStack
+      - ScannerStack
+    Properties:
+      TemplateURL: orchestration.yaml
+      Parameters:
+        StackPrefix: !Ref AWS::StackName
+        ScannerASGName: !GetAtt ScannerStack.Outputs.ScannerASGName
+        LambdaRoleArn: !GetAtt IAMStack.Outputs.LambdaRoleArn
+        SFNRoleArn: !GetAtt IAMStack.Outputs.SFNRoleArn
+        ResultsBucketName: !GetAtt StorageStack.Outputs.ResultsBucketName
+        GHCRSecretArn: !GetAtt StorageStack.Outputs.GHCRSecretArn
+        GHCRImageURI: !Ref GHCRImageURI
+        ScannerAZ: !GetAtt VPCStack.Outputs.PrivateSubnetAZ
+        LambdaCodeBucket: !Ref LambdaCodeBucket
+      TimeoutInMinutes: 30
+      Tags:
+        - Key: ManagedBy
+          Value: yara-scanner
+
+Outputs:
+  ResultsBucketName:
+    Description: "S3 bucket where scan results are stored"
+    Value: !GetAtt StorageStack.Outputs.ResultsBucketName
+
+  GHCRSecretArn:
+    Description: "Secrets Manager ARN for GHCR credentials"
+    Value: !GetAtt StorageStack.Outputs.GHCRSecretArn
+
+  StateMachineArn:
+    Description: "Step Functions state machine ARN"
+    Value: !GetAtt OrchestrationStack.Outputs.StateMachineArn
+
+  TriggerScanFunctionName:
+    Description: "Lambda function name to invoke to start a scan"
+    Value: !GetAtt OrchestrationStack.Outputs.TriggerScanFunctionName
+
+  ScannerASGName:
+    Description: "Auto Scaling Group for scanner EC2"
+    Value: !GetAtt ScannerStack.Outputs.ScannerASGName
