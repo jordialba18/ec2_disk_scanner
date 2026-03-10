@@ -5,7 +5,7 @@ Sends an SSM Run Command to the scanner EC2. The embedded bash script:
   1. Discovers the NVMe device via /sys/block/*/device/serial
   2. Detects filesystem type with blkid (ext4, xfs, ntfs, or partition p1)
   3. Mounts read-only
-  4. Pulls + runs the YARA Docker image
+  4. Loads the YARA Docker image from S3 (if not already cached) and runs it
   5. Uploads results to S3
   6. Unmounts and cleans up
 
@@ -36,8 +36,7 @@ def lambda_handler(event, context):
     instance_id = event["instance_id"]
 
     results_bucket = os.environ["RESULTS_BUCKET"]
-    ghcr_secret_arn = os.environ["GHCR_SECRET_ARN"]
-    ghcr_image_uri = os.environ["GHCR_IMAGE_URI"]
+    scanner_image_uri = os.environ["SCANNER_IMAGE_URI"]
 
     # Build the scan script with all parameters interpolated server-side
     scan_script = build_scan_script(
@@ -45,8 +44,7 @@ def lambda_handler(event, context):
         volume_id=volume_id,
         execution_id=execution_id,
         results_bucket=results_bucket,
-        ghcr_secret_arn=ghcr_secret_arn,
-        ghcr_image_uri=ghcr_image_uri,
+        scanner_image_uri=scanner_image_uri,
     )
 
     # Store task_token in SSM Parameter Store so check_scan_status can retrieve it
@@ -97,7 +95,7 @@ def lambda_handler(event, context):
 
 
 def build_scan_script(
-    scan_volume_id, volume_id, execution_id, results_bucket, ghcr_secret_arn, ghcr_image_uri
+    scan_volume_id, volume_id, execution_id, results_bucket, scanner_image_uri
 ):
     """Build the bash script that runs inside the scanner EC2."""
     # Strip 'vol-' prefix for NVMe serial matching
@@ -110,8 +108,7 @@ export SCAN_VOL_ID="{scan_volume_id}"
 export VOL_SERIAL="{vol_serial}"
 export EXECUTION_ID="{execution_id}"
 export RESULTS_BUCKET="{results_bucket}"
-export GHCR_SECRET_ARN="{ghcr_secret_arn}"
-export GHCR_IMAGE_URI="{ghcr_image_uri}"
+export SCANNER_IMAGE_URI="{scanner_image_uri}"
 export MOUNT_POINT="/mnt/scan/${{SCAN_VOL_ID}}"
 export RESULT_FILE="/tmp/yara-result-${{VOL_ID}}.json"
 
@@ -194,20 +191,16 @@ if [ "$MOUNTED" = "false" ]; then
 fi
 
 # -----------------------------------------------------------------------
-# 3. Docker login to GHCR and run YARA scan
+# 3. Load scanner image from S3 (if not already in Docker cache) and run
 # -----------------------------------------------------------------------
-echo "Fetching GHCR credentials from Secrets Manager..."
-SECRET_JSON=$(aws secretsmanager get-secret-value \
-    --secret-id "$GHCR_SECRET_ARN" \
-    --query SecretString --output text)
-
-GHCR_USER=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['username'])")
-GHCR_PASS=$(echo "$SECRET_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['password'])")
-
-echo "$GHCR_PASS" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-
-echo "Pulling YARA scanner image: $GHCR_IMAGE_URI"
-docker pull "$GHCR_IMAGE_URI"
+if ! docker image inspect "$SCANNER_IMAGE_URI" &>/dev/null; then
+    echo "Loading scanner image from S3..."
+    aws s3 cp "s3://$RESULTS_BUCKET/scanner-image/scanner.tar.gz" /tmp/scanner.tar.gz
+    docker load < /tmp/scanner.tar.gz
+    rm -f /tmp/scanner.tar.gz
+else
+    echo "Scanner image already loaded: $SCANNER_IMAGE_URI"
+fi
 
 echo "Running YARA scan on $MOUNT_POINT..."
 docker run --rm \
@@ -216,7 +209,7 @@ docker run --rm \
     -e EXECUTION_ID="$EXECUTION_ID" \
     -e OUTPUT_FILE="/tmp/result.json" \
     -v /tmp:/tmp \
-    "$GHCR_IMAGE_URI" \
+    "$SCANNER_IMAGE_URI" \
     --output /tmp/result.json \
     /scan 2>&1 | tee /tmp/yara-scan-output.txt
 
@@ -260,7 +253,6 @@ aws s3 cp "$RESULT_FILE" "s3://$RESULTS_BUCKET/scans/$EXECUTION_ID/$VOL_ID.json"
 # -----------------------------------------------------------------------
 # 5. Cleanup
 # -----------------------------------------------------------------------
-docker logout ghcr.io || true
 umount "$MOUNT_POINT" 2>/dev/null || true
 rm -rf "$MOUNT_POINT"
 rm -f /tmp/result.json /tmp/yara-scan-output.txt "$RESULT_FILE"

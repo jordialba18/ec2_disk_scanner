@@ -5,11 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Deploy
 
 ```bash
-# Minimum required
-./scripts/deploy.sh ghcr.io/org/yara-scanner:latest <ghcr_user> <ghcr_token>
+# Minimum required (image must exist locally: docker images)
+./scripts/deploy.sh yara-scanner:latest
 
 # Full options
-./scripts/deploy.sh ghcr.io/org/yara-scanner:latest <ghcr_user> <ghcr_token> \
+./scripts/deploy.sh yara-scanner:latest \
     --region us-east-1 \
     --profile my-profile \
     --stack yara-ec2-scanner \
@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
     --output ./results
 ```
 
-The script: creates staging bucket → zips each `lambda/*/handler.py` → uploads to S3 → `cloudformation package` → `cloudformation deploy` → populates GHCR secret → polls SSM until Online → (optionally) invokes scan and waits.
+The script: creates staging bucket → zips each `lambda/*/handler.py` → uploads to S3 → `cloudformation package` → `cloudformation deploy` → `docker save | gzip | s3 cp` scanner image → polls SSM until Online → (optionally) invokes scan and waits.
 
 ## Trigger a scan manually
 
@@ -58,7 +58,7 @@ aws ec2 describe-snapshots --filters "Name=tag:ManagedBy,Values=yara-scanner" \
 
 ```
 root.yaml
-├── vpc.yaml         — VPC, private subnet, NAT GW, SSM/S3/SecretsManager VPC endpoints
+├── vpc.yaml         — VPC, private subnet, SSM/S3 VPC endpoints (air-gapped, no NAT GW)
 ├── storage.yaml     — S3 bucket ({StackPrefix}-results-{account}-{region}) + Secrets Manager
 ├── iam.yaml         — Lambda role, SFN role, scanner EC2 role + instance profile
 ├── scanner.yaml     — LaunchTemplate + ASG (min/max/desired=1)
@@ -116,7 +116,7 @@ The scanner image must:
 |--------|-------------|
 | `trigger_scan` | `STATE_MACHINE_ARN` |
 | `attach_volume` | `SCANNER_ASG_NAME`, `SCANNER_AZ` |
-| `run_scan` | `RESULTS_BUCKET`, `GHCR_SECRET_ARN`, `GHCR_IMAGE_URI`, `SCANNER_AZ` |
+| `run_scan` | `RESULTS_BUCKET`, `SCANNER_IMAGE_URI`, `SCANNER_AZ` |
 | all others | `SCANNER_AZ` |
 
 ### Troubleshooting quick reference
@@ -124,7 +124,7 @@ The scanner image must:
 | Symptom | Cause |
 |---------|-------|
 | `device_not_found` in scan result | NVMe serial mismatch; volume still attaching; check `check_volume_attached` logs |
-| Docker pull fails on scanner EC2 | GHCR secret not populated or wrong credentials |
+| Docker load fails on scanner EC2 | Image tarball not uploaded; verify `s3://<bucket>/scanner-image/scanner.tar.gz` exists |
 | SFN stuck at `WaitSnapshots` | Large volumes can take 30+ min per TB |
 | SSM PingStatus not Online | EC2 userdata failed; check `/var/log/yara-scanner-init.log` via `get-console-output` |
 | Orphaned volumes/snapshots after failure | Cleanup Lambda logs; manually delete resources tagged `ManagedBy=yara-scanner` |

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "YARA Scanner — S3 results bucket and Secrets Manager GHCR credential stub"
+Description: "YARA Scanner — S3 results bucket"
 
 Parameters:
   StackPrefix:
@@ -53,16 +53,6 @@ Resources:
               Bool:
                 aws:SecureTransport: false
 
-  GHCRSecret:
-    Type: AWS::SecretsManager::Secret
-    Properties:
-      Name: !Sub "${StackPrefix}/ghcr-credentials"
-      Description: "GHCR credentials for pulling YARA scanner image."
-      SecretString: '{"username":"REPLACE_ME","password":"REPLACE_ME"}'
-      Tags:
-        - Key: ManagedBy
-          Value: yara-scanner
-
 Outputs:
   ResultsBucketName:
     Value: !Ref ResultsBucket
@@ -74,7 +64,3 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-ResultsBucketArn"
 
-  GHCRSecretArn:
-    Value: !Ref GHCRSecret
-    Export:
-      Name: !Sub "${AWS::StackName}-GHCRSecretArn"

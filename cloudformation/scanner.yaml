@@ -16,7 +16,7 @@ Parameters:
     Default: t3.medium
   ScannerAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
 
 Resources:
   ScannerLaunchTemplate:
@@ -45,25 +45,21 @@ Resources:
             #!/bin/bash
             set -euxo pipefail
 
-            # Update and install dependencies
-            dnf update -y
-            dnf install -y docker nvme-cli ntfsprogs aws-cli python3-pip
-
-            # Enable and start Docker
+            # ECS-optimized AMI has Docker pre-installed; ensure it is running
             systemctl enable docker
             systemctl start docker
 
             # Add ec2-user to docker group
             usermod -aG docker ec2-user
 
-            # Ensure SSM agent is running (pre-installed on AL2023)
+            # Ensure SSM agent is running (pre-installed on ECS-optimized AMI)
             systemctl enable amazon-ssm-agent
             systemctl start amazon-ssm-agent
 
             # Create mount point directory
             mkdir -p /mnt/scan
 
-            # Install ntfs-3g for Windows volume support
+            # Optional: NTFS support for Windows volumes (fails silently if unavailable)
             dnf install -y fuse ntfs-3g || true
 
             # Signal completion

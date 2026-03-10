@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "YARA Scanner — VPC, subnets, NAT GW, SSM/S3 VPC endpoints"
+Description: "YARA Scanner — VPC, subnets, SSM/S3 VPC endpoints (fully air-gapped, no NAT GW)"
 
 Resources:
   VPC:
@@ -68,21 +68,6 @@ Resources:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
 
-  EIP:
-    Type: AWS::EC2::EIP
-    DependsOn: VPCGatewayAttachment
-    Properties:
-      Domain: vpc
-
-  NATGateway:
-    Type: AWS::EC2::NatGateway
-    Properties:
-      AllocationId: !GetAtt EIP.AllocationId
-      SubnetId: !Ref PublicSubnet
-      Tags:
-        - Key: Name
-          Value: yara-scanner-natgw
-
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -90,13 +75,6 @@ Resources:
       Tags:
         - Key: Name
           Value: yara-scanner-private-rt
-
-  PrivateRoute:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: "0.0.0.0/0"
-      NatGatewayId: !Ref NATGateway
 
   PrivateSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -125,7 +103,7 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: "0.0.0.0/0"
-          Description: "HTTPS for SSM, GHCR, ECR"
+          Description: "HTTPS for SSM and S3 VPC endpoints"
       Tags:
         - Key: Name
           Value: yara-scanner-sg
@@ -160,19 +138,6 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.ec2messages"
-      VpcEndpointType: Interface
-      SubnetIds:
-        - !Ref PrivateSubnet
-      SecurityGroupIds:
-        - !Ref ScannerSecurityGroup
-      PrivateDnsEnabled: true
-
-  # Secrets Manager endpoint — so scanner can fetch GHCR creds without NAT
-  SecretsManagerEndpoint:
-    Type: AWS::EC2::VPCEndpoint
-    Properties:
-      VpcId: !Ref VPC
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
       VpcEndpointType: Interface
       SubnetIds:
         - !Ref PrivateSubnet

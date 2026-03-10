@@ -14,9 +14,7 @@ Parameters:
     Type: String
   ResultsBucketName:
     Type: String
-  GHCRSecretArn:
-    Type: String
-  GHCRImageURI:
+  ScannerImageURI:
     Type: String
   ScannerAZ:
     Type: String
@@ -231,8 +229,7 @@ Resources:
         Variables:
           SCANNER_AZ: !Ref ScannerAZ
           RESULTS_BUCKET: !Ref ResultsBucketName
-          GHCR_SECRET_ARN: !Ref GHCRSecretArn
-          GHCR_IMAGE_URI: !Ref GHCRImageURI
+          SCANNER_IMAGE_URI: !Ref ScannerImageURI
       Tags:
         - Key: ManagedBy
           Value: yara-scanner

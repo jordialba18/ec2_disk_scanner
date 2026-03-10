@@ -2,7 +2,10 @@
 # deploy.sh — Deploy YARA EC2 agentless scanner end-to-end
 #
 # Usage:
-#   ./scripts/deploy.sh <GHCR_IMAGE_URI> <GHCR_USER> <GHCR_TOKEN> [OPTIONS]
+#   ./scripts/deploy.sh <SCANNER_IMAGE_URI> [OPTIONS]
+#
+# The scanner image must exist in the local Docker daemon before running this script.
+# It will be saved as a gzip tarball and uploaded to the results S3 bucket.
 #
 # Options:
 #   --region  <region>     AWS region (required if not in AWS CLI config)
@@ -34,23 +37,21 @@ step() {
 # -----------------------------------------------------------------------
 # Parse positional args (required)
 # -----------------------------------------------------------------------
-GHCR_IMAGE_URI="${1:-}"
-GHCR_USER="${2:-}"
-GHCR_TOKEN="${3:-}"
+SCANNER_IMAGE_URI="${1:-}"
 
-if [[ -z "$GHCR_IMAGE_URI" ]]; then
-    echo "Usage: $0 <GHCR_IMAGE_URI> <GHCR_USER> <GHCR_TOKEN> [OPTIONS]" >&2
+if [[ -z "$SCANNER_IMAGE_URI" ]]; then
+    echo "Usage: $0 <SCANNER_IMAGE_URI> [OPTIONS]" >&2
+    echo "       The image must exist in the local Docker daemon (docker images)." >&2
     exit 1
 fi
-if [[ -z "$GHCR_USER" ]]; then
-    echo "ERROR: GHCR_USER (argument 2) is required." >&2
+shift 1
+
+# Pre-flight: verify image exists locally
+if ! docker image inspect "$SCANNER_IMAGE_URI" &>/dev/null; then
+    echo "ERROR: Docker image '$SCANNER_IMAGE_URI' not found locally." >&2
+    echo "       Build or pull the image first, then re-run deploy.sh." >&2
     exit 1
 fi
-if [[ -z "$GHCR_TOKEN" ]]; then
-    echo "ERROR: GHCR_TOKEN (argument 3) is required." >&2
-    exit 1
-fi
-shift 3
 
 # -----------------------------------------------------------------------
 # Parse optional flags
@@ -117,14 +118,13 @@ CFN_DIR="$PROJECT_ROOT/cloudformation"
 echo "================================================="
 echo "YARA EC2 Scanner Deployment"
 echo "================================================="
-echo "GHCR Image  : $GHCR_IMAGE_URI"
-echo "GHCR User   : $GHCR_USER"
-echo "AWS Account : $AWS_ACCOUNT_ID"
-echo "AWS Region  : $AWS_REGION"
-echo "Staging S3  : s3://$STAGING_BUCKET"
-echo "Stack Name  : $STACK_NAME"
-echo "Auto-scan   : $AUTO_SCAN"
-[[ -n "$AWS_PROFILE" ]] && echo "Profile     : $AWS_PROFILE"
+echo "Scanner Image : $SCANNER_IMAGE_URI"
+echo "AWS Account   : $AWS_ACCOUNT_ID"
+echo "AWS Region    : $AWS_REGION"
+echo "Staging S3    : s3://$STAGING_BUCKET"
+echo "Stack Name    : $STACK_NAME"
+echo "Auto-scan     : $AUTO_SCAN"
+[[ -n "$AWS_PROFILE" ]] && echo "Profile       : $AWS_PROFILE"
 echo "================================================="
 
 # -----------------------------------------------------------------------
@@ -215,7 +215,7 @@ aws cloudformation deploy \
     --stack-name "$STACK_NAME" \
     --region "$AWS_REGION" \
     --parameter-overrides \
-        GHCRImageURI="$GHCR_IMAGE_URI" \
+        ScannerImageURI="$SCANNER_IMAGE_URI" \
         LambdaCodeBucket="$STAGING_BUCKET" \
     --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
     --no-fail-on-empty-changeset
@@ -223,12 +223,6 @@ aws cloudformation deploy \
 echo "    Stack deployment complete."
 
 # Fetch stack outputs needed by subsequent steps
-GHCR_SECRET_ARN=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --region "$AWS_REGION" \
-    --query "Stacks[0].Outputs[?OutputKey=='GHCRSecretArn'].OutputValue" \
-    --output text)
-
 RESULTS_BUCKET=$(aws cloudformation describe-stacks \
     --stack-name "$STACK_NAME" \
     --region "$AWS_REGION" \
@@ -248,21 +242,20 @@ SCANNER_ASG_NAME=$(aws cloudformation describe-stacks \
     --output text)
 
 # -----------------------------------------------------------------------
-# Step 5: Populate GHCR credentials
+# Step 4.5: Upload scanner image to S3 (air-gapped distribution)
 # -----------------------------------------------------------------------
-step "Step 5: Populating GHCR credentials in Secrets Manager..."
+step "Step 4.5: Uploading scanner image to S3..."
 
-aws secretsmanager put-secret-value \
-    --secret-id "$GHCR_SECRET_ARN" \
-    --secret-string "{\"username\":\"${GHCR_USER}\",\"password\":\"${GHCR_TOKEN}\"}" \
+docker save "$SCANNER_IMAGE_URI" | gzip | aws s3 cp - \
+    "s3://${RESULTS_BUCKET}/scanner-image/scanner.tar.gz" \
     --region "$AWS_REGION"
 
-echo "    Credentials stored in $GHCR_SECRET_ARN"
+echo "    Scanner image uploaded to s3://${RESULTS_BUCKET}/scanner-image/scanner.tar.gz"
 
 # -----------------------------------------------------------------------
-# Step 6: Wait for scanner EC2 SSM agent to come Online
+# Step 5: Wait for scanner EC2 SSM agent to come Online
 # -----------------------------------------------------------------------
-step "Step 6: Waiting for scanner EC2 SSM agent to come Online (timeout 10 min)..."
+step "Step 5: Waiting for scanner EC2 SSM agent to come Online (timeout 10 min)..."
 
 SSM_TIMEOUT=600
 SSM_START=$(date +%s)
@@ -292,10 +285,10 @@ while true; do
 done
 
 # -----------------------------------------------------------------------
-# Step 7: (optional) Trigger scan and wait for results
+# Step 6: (optional) Trigger scan and wait for results
 # -----------------------------------------------------------------------
 if [[ "$AUTO_SCAN" == "true" ]]; then
-    step "Step 7: Triggering scan via Lambda '${TRIGGER_FUNCTION}'..."
+    step "Step 6: Triggering scan via Lambda '${TRIGGER_FUNCTION}'..."
 
     INVOKE_TMPFILE=$(mktemp)
     aws lambda invoke \
@@ -386,7 +379,7 @@ echo "DEPLOYMENT COMPLETE [$(elapsed)]"
 echo "================================================="
 echo ""
 echo "Results bucket : s3://${RESULTS_BUCKET}/"
-echo "GHCR secret    : ${GHCR_SECRET_ARN}"
+echo "Scanner image  : s3://${RESULTS_BUCKET}/scanner-image/scanner.tar.gz"
 echo "Scanner ASG    : ${SCANNER_ASG_NAME}"
 echo ""
 echo "To trigger a new scan:"

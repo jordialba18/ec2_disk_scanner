@@ -7,8 +7,6 @@ Parameters:
     Description: "Prefix for resource names (root stack name)"
   ResultsBucketArn:
     Type: String
-  GHCRSecretArn:
-    Type: String
 
 Resources:
   LambdaExecutionRole:
@@ -64,11 +62,6 @@ Resources:
                 Resource:
                   - !Ref ResultsBucketArn
                   - !Sub "${ResultsBucketArn}/*"
-              - Sid: SecretsManagerPermissions
-                Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref GHCRSecretArn
               - Sid: StepFunctionsPermissions
                 Effect: Allow
                 Action:
@@ -152,11 +145,7 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub "${ResultsBucketArn}/scans/*"
-              - Sid: SecretsManagerGHCR
-                Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref GHCRSecretArn
+                  - !Sub "${ResultsBucketArn}/scanner-image/*"
               - Sid: SSMTaskTokens
                 Effect: Allow
                 Action:

@@ -27,10 +27,9 @@ Step Functions State Machine
 ```
 
 **Infrastructure:**
-- Dedicated VPC (private subnet + NAT GW + SSM/S3/SecretsManager VPC endpoints)
-- Scanner EC2 t3.medium (AL2023, Docker+SSM, ASG min/max/desired=1)
-- S3 results bucket (90-day lifecycle)
-- Secrets Manager secret for GHCR credentials
+- Dedicated VPC (private subnet, fully air-gapped — no NAT Gateway, SSM/S3 VPC endpoints only)
+- Scanner EC2 t3.medium (ECS-optimized AL2023 — Docker pre-installed, ASG min/max/desired=1)
+- S3 results bucket (90-day lifecycle, scanner image stored at `scanner-image/scanner.tar.gz`)
 - All resources tagged `ManagedBy=yara-scanner`
 
 ## Project Structure
@@ -63,17 +62,19 @@ ec2_disk_scanner/
 
 ## Prerequisites
 
-- AWS CLI configured with credentials that have CloudFormation, EC2, Lambda, S3, IAM, SSM, and Secrets Manager permissions
-- A YARA scanner Docker image hosted on GHCR (see [YARA Docker image](#yara-docker-image))
+- AWS CLI configured with credentials that have CloudFormation, EC2, Lambda, S3, IAM, and SSM permissions
+- Docker installed locally with the YARA scanner image available (`docker images`) — see [YARA Docker image](#yara-docker-image)
+- No GHCR account or credentials needed; the image is distributed via S3
 
 ## Deployment
 
 ```bash
 # Minimum — region taken from AWS CLI config
-./scripts/deploy.sh ghcr.io/your-org/yara-scanner:latest <ghcr_user> <ghcr_token>
+# The image must exist locally: docker build -t yara-scanner:latest .
+./scripts/deploy.sh yara-scanner:latest
 
 # Full options
-./scripts/deploy.sh ghcr.io/your-org/yara-scanner:latest <ghcr_user> <ghcr_token> \
+./scripts/deploy.sh yara-scanner:latest \
     --region us-west-2 \
     --stack yara-ec2-scanner \
     --bucket my-staging-bucket \
@@ -97,9 +98,9 @@ The script performs these steps automatically:
 2. Zips and uploads each Lambda handler
 3. Packages CloudFormation nested templates
 4. Deploys the root CloudFormation stack
-5. Populates GHCR credentials in Secrets Manager
-6. Polls SSM until the scanner EC2 reports Online (10 min timeout)
-7. *(with `--auto-scan`)* Invokes the scan, polls until SUCCEEDED, downloads `summary.json`
+4.5. Saves the scanner image (`docker save | gzip`) and uploads to `s3://<results-bucket>/scanner-image/scanner.tar.gz`
+5. Polls SSM until the scanner EC2 reports Online (10 min timeout)
+6. *(with `--auto-scan`)* Invokes the scan, polls until SUCCEEDED, downloads `summary.json`
 
 ## Running a Scan
 
@@ -183,8 +184,8 @@ print(f"Scan complete: {len(matches)} matches")
 Per scan execution:
 - **Snapshots**: ~$0.05/GB-month (deleted after scan)
 - **EBS volumes**: ~$0.08/GB-month gp3 (created and deleted per scan)
-- **NAT Gateway**: ~$0.045/hour + data processing (for GHCR pulls)
 - **Scanner EC2** t3.medium: ~$0.0416/hour (always running in ASG)
+- **No NAT Gateway costs** — VPC is fully air-gapped; image distributed via S3
 - **Lambda**: negligible
 - **Step Functions**: $0.025 per 1,000 state transitions
 
@@ -221,7 +222,7 @@ aws ec2 describe-volumes \
 |---------|-------|
 | SSM agent not Online after deploy | EC2 userdata failed; check console output (`aws ec2 get-console-output`); verify SSM VPC endpoints exist; check `/var/log/yara-scanner-init.log` |
 | `device_not_found` in scan result | NVMe serial mismatch; volume may still be attaching; check `check_volume_attached` Lambda logs |
-| Docker pull fails | GHCR credentials not set or invalid; verify the secret value in Secrets Manager |
+| Docker load fails on scanner EC2 | Image tarball not uploaded or S3 VPC endpoint missing; verify `s3://<bucket>/scanner-image/scanner.tar.gz` exists |
 | Scan volume not deleted | Check Cleanup Lambda logs; run manual cleanup against resources tagged `ManagedBy=yara-scanner` |
 | Step Functions execution stuck in WaitSnapshots | Large volume; snapshot can take 30+ min for multi-TB volumes |
 | NTFS volume not mounting | `ntfs-3g` install may have failed; check `/var/log/yara-scanner-init.log` via `get-console-output` |
@@ -238,10 +239,10 @@ aws ssm describe-instance-information \
 
 ## Security Notes
 
-- Scanner EC2 is in a private subnet with no inbound access
+- Scanner EC2 is in a private subnet with no inbound access and no internet egress (fully air-gapped)
 - All S3 traffic goes through the S3 VPC Gateway Endpoint (never over the internet)
 - SSM communication uses VPC Interface Endpoints
-- Secrets Manager credentials never leave the VPC
+- Scanner image distributed via S3 — no registry credentials required
 - All scan volumes are read-only mounts
 - Results bucket enforces SSL-only access
 - EC2 metadata service requires IMDSv2 (HttpTokens=required)
