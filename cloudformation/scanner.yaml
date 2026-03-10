@@ -15,8 +15,7 @@ Parameters:
     Type: String
     Default: t3.medium
   ScannerAmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
+    Type: AWS::EC2::Image::Id
 
 Resources:
   ScannerLaunchTemplate:
@@ -101,7 +100,7 @@ Resources:
           PropagateAtLaunch: true
     UpdatePolicy:
       AutoScalingRollingUpdate:
-        MinInstancesInService: 1
+        MinInstancesInService: 0
         MaxBatchSize: 1
 
 Outputs:
