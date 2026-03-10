@@ -96,7 +96,7 @@ Resources:
   ScannerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "YARA scanner EC2 — outbound HTTPS only"
+      GroupDescription: "YARA scanner EC2 - outbound HTTPS only"
       VpcId: !Ref VPC
       SecurityGroupEgress:
         - IpProtocol: tcp

@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: YARA Scanner — Root stack orchestrating all nested stacks
+Parameters:
+  ScannerImageURI:
+    Type: String
+    Description: Docker image URI for the YARA scanner (must be pre-loaded to S3 by
+      deploy.sh)
+  ScannerInstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+    - t3.medium
+    - t3.large
+    - t3.xlarge
+    - m5.large
+    - m5.xlarge
+    Description: Instance type for scanner EC2
+  LambdaCodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+  ScannerAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id
+    Description: AMI ID for scanner EC2 (ECS-optimized AL2023 — Docker pre-installed)
+Resources:
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/708b4a028f4e855e177e8401e3112b38.template
+      TimeoutInMinutes: 30
+      Tags:
+      - Key: ManagedBy
+        Value: yara-scanner
+  StorageStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/29bfd5f554c11957934a4d6209b4f2e2.template
+      Parameters:
+        StackPrefix:
+          Ref: AWS::StackName
+      TimeoutInMinutes: 15
+      Tags:
+      - Key: ManagedBy
+        Value: yara-scanner
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - StorageStack
+    Properties:
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/f3e1f501a554e873cea5c15076ec48ce.template
+      Parameters:
+        StackPrefix:
+          Ref: AWS::StackName
+        ResultsBucketArn:
+          Fn::GetAtt:
+          - StorageStack
+          - Outputs.ResultsBucketArn
+      TimeoutInMinutes: 15
+      Tags:
+      - Key: ManagedBy
+        Value: yara-scanner
+  ScannerStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - VPCStack
+    - IAMStack
+    Properties:
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/ebf77fb50002886300d9d255b4cfaa35.template
+      Parameters:
+        StackPrefix:
+          Ref: AWS::StackName
+        PrivateSubnetId:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.PrivateSubnetId
+        ScannerSecurityGroupId:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.ScannerSecurityGroupId
+        ScannerInstanceProfileArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.ScannerInstanceProfileArn
+        InstanceType:
+          Ref: ScannerInstanceType
+        ScannerAmiId:
+          Ref: ScannerAmiId
+      TimeoutInMinutes: 20
+      Tags:
+      - Key: ManagedBy
+        Value: yara-scanner
+  OrchestrationStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+    - IAMStack
+    - StorageStack
+    - VPCStack
+    - ScannerStack
+    Properties:
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/6ebcd0d49753881cf72cd7cff9b3a138.template
+      Parameters:
+        StackPrefix:
+          Ref: AWS::StackName
+        ScannerASGName:
+          Fn::GetAtt:
+          - ScannerStack
+          - Outputs.ScannerASGName
+        LambdaRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.LambdaRoleArn
+        SFNRoleArn:
+          Fn::GetAtt:
+          - IAMStack
+          - Outputs.SFNRoleArn
+        ResultsBucketName:
+          Fn::GetAtt:
+          - StorageStack
+          - Outputs.ResultsBucketName
+        ScannerImageURI:
+          Ref: ScannerImageURI
+        ScannerAZ:
+          Fn::GetAtt:
+          - VPCStack
+          - Outputs.PrivateSubnetAZ
+        LambdaCodeBucket:
+          Ref: LambdaCodeBucket
+      TimeoutInMinutes: 30
+      Tags:
+      - Key: ManagedBy
+        Value: yara-scanner
+Outputs:
+  ResultsBucketName:
+    Description: S3 bucket where scan results are stored
+    Value:
+      Fn::GetAtt:
+      - StorageStack
+      - Outputs.ResultsBucketName
+  StateMachineArn:
+    Description: Step Functions state machine ARN
+    Value:
+      Fn::GetAtt:
+      - OrchestrationStack
+      - Outputs.StateMachineArn
+  TriggerScanFunctionName:
+    Description: Lambda function name to invoke to start a scan
+    Value:
+      Fn::GetAtt:
+      - OrchestrationStack
+      - Outputs.TriggerScanFunctionName
+  ScannerASGName:
+    Description: Auto Scaling Group for scanner EC2
+    Value:
+      Fn::GetAtt:
+      - ScannerStack
+      - Outputs.ScannerASGName
