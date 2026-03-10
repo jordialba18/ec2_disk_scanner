@@ -44,7 +44,10 @@ Resources:
             #!/bin/bash
             set -euxo pipefail
 
-            # ECS-optimized AMI has Docker pre-installed; ensure it is running
+            # ECS-optimized AMI has Docker pre-installed; disable ECS agent (not needed here)
+            systemctl disable --now ecs || true
+
+            # Ensure Docker is running
             systemctl enable docker
             systemctl start docker
 
