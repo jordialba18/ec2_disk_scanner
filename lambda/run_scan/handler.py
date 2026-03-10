@@ -210,8 +210,8 @@ docker run --rm \
     -e OUTPUT_FILE="/tmp/result.json" \
     -v /tmp:/tmp \
     "$SCANNER_IMAGE_URI" \
-    --output /tmp/result.json \
-    /scan 2>&1 | tee /tmp/yara-scan-output.txt
+    --output=json \
+    --local /scan 2>&1 | tee /tmp/yara-scan-output.txt
 
 # -----------------------------------------------------------------------
 # 4. Collect results and upload to S3
