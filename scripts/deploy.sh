@@ -246,18 +246,22 @@ SCANNER_ASG_NAME=$(aws cloudformation describe-stacks \
 # -----------------------------------------------------------------------
 step "Step 4.5: Uploading scanner image to S3..."
 
-SCANNER_TMPFILE=$(mktemp /tmp/scanner-image-XXXXXX.tar.gz)
-trap 'rm -f "$SCANNER_TMPFILE"' EXIT
+S3_IMAGE_PATH="s3://${RESULTS_BUCKET}/scanner-image/scanner.tar.gz"
+if aws s3 ls "$S3_IMAGE_PATH" --region "$AWS_REGION" &>/dev/null; then
+    echo "    Image already exists at ${S3_IMAGE_PATH} — skipping upload."
+else
+    SCANNER_TMPFILE=$(mktemp /tmp/scanner-image-XXXXXX.tar.gz)
+    trap 'rm -f "$SCANNER_TMPFILE"' EXIT
 
-echo "    Saving and compressing Docker image (this may take a few minutes)..."
-docker save "$SCANNER_IMAGE_URI" | gzip > "$SCANNER_TMPFILE"
-IMAGE_SIZE=$(du -sh "$SCANNER_TMPFILE" | cut -f1)
-echo "    Compressed image size: ${IMAGE_SIZE} — uploading to S3..."
-aws s3 cp "$SCANNER_TMPFILE" \
-    "s3://${RESULTS_BUCKET}/scanner-image/scanner.tar.gz" \
-    --region "$AWS_REGION"
+    echo "    Saving and compressing Docker image (this may take a few minutes)..."
+    docker save "$SCANNER_IMAGE_URI" | gzip > "$SCANNER_TMPFILE"
+    IMAGE_SIZE=$(du -sh "$SCANNER_TMPFILE" | cut -f1)
+    echo "    Compressed image size: ${IMAGE_SIZE} — uploading to S3..."
+    aws s3 cp "$SCANNER_TMPFILE" "$S3_IMAGE_PATH" \
+        --region "$AWS_REGION"
 
-echo "    Scanner image uploaded to s3://${RESULTS_BUCKET}/scanner-image/scanner.tar.gz"
+    echo "    Scanner image uploaded to ${S3_IMAGE_PATH}"
+fi
 
 # -----------------------------------------------------------------------
 # Step 5: Wait for scanner EC2 SSM agent to come Online
