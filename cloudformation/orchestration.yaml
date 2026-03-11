@@ -105,7 +105,7 @@ Resources:
         S3Key: lambda/trigger_scan.zip
       Environment:
         Variables:
-          STATE_MACHINE_ARN: !Ref ScannerStateMachine
+          STATE_MACHINE_ARN: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${StackPrefix}-scanner"
           SCANNER_AZ: !Ref ScannerAZ
       Tags:
         - Key: ManagedBy

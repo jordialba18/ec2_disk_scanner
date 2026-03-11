@@ -62,9 +62,27 @@ ec2_disk_scanner/
 
 ## Prerequisites
 
-- AWS CLI configured with credentials that have CloudFormation, EC2, Lambda, S3, IAM, and SSM permissions
+- AWS CLI configured with credentials that have the permissions listed below
 - Docker installed locally with the YARA scanner image available (`docker images`) — see [YARA Docker image](#yara-docker-image)
 - No GHCR account or credentials needed; the image is distributed via S3
+
+### Required IAM Permissions for the Deploying Identity
+
+The AWS user or role running `deploy.sh` / `cloudformation deploy` must be allowed to perform the following actions:
+
+| Service | Required Actions |
+|---------|-----------------|
+| CloudFormation | `cloudformation:CreateStack`, `cloudformation:UpdateStack`, `cloudformation:DeleteStack`, `cloudformation:DescribeStacks`, `cloudformation:CreateChangeSet`, `cloudformation:ExecuteChangeSet`, `cloudformation:DescribeChangeSet`, `cloudformation:GetTemplate`, `cloudformation:ValidateTemplate` |
+| S3 | `s3:CreateBucket`, `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket`, `s3:PutBucketPolicy`, `s3:PutLifecycleConfiguration`, `s3:PutBucketPublicAccessBlock` |
+| Lambda | `lambda:CreateFunction`, `lambda:UpdateFunctionCode`, `lambda:UpdateFunctionConfiguration`, `lambda:GetFunction`, `lambda:DeleteFunction`, `lambda:AddPermission`, `lambda:RemovePermission`, `lambda:InvokeFunction` |
+| Step Functions | `states:CreateStateMachine`, `states:UpdateStateMachine`, `states:DeleteStateMachine`, `states:DescribeStateMachine`, `states:StartExecution`, `states:DescribeExecution` |
+| IAM | `iam:CreateRole`, `iam:DeleteRole`, `iam:AttachRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePolicy`, `iam:DeleteRolePolicy`, `iam:GetRole`, `iam:PassRole`, `iam:CreateInstanceProfile`, `iam:DeleteInstanceProfile`, `iam:AddRoleToInstanceProfile`, `iam:RemoveRoleFromInstanceProfile` |
+| EC2 | `ec2:CreateVpc`, `ec2:DeleteVpc`, `ec2:CreateSubnet`, `ec2:DeleteSubnet`, `ec2:CreateSecurityGroup`, `ec2:DeleteSecurityGroup`, `ec2:CreateVpcEndpoint`, `ec2:DeleteVpcEndpoints`, `ec2:DescribeVpcs`, `ec2:DescribeSubnets`, `ec2:DescribeInstances`, `ec2:RunInstances`, `ec2:CreateLaunchTemplate`, `ec2:DeleteLaunchTemplate`, `ec2:CreateSnapshot`, `ec2:DeleteSnapshot`, `ec2:CreateVolume`, `ec2:DeleteVolume`, `ec2:AttachVolume`, `ec2:DetachVolume` |
+| Auto Scaling | `autoscaling:CreateAutoScalingGroup`, `autoscaling:UpdateAutoScalingGroup`, `autoscaling:DeleteAutoScalingGroup`, `autoscaling:DescribeAutoScalingGroups` |
+| SSM | `ssm:PutParameter`, `ssm:GetParameter`, `ssm:DeleteParameter`, `ssm:SendCommand`, `ssm:GetCommandInvocation`, `ssm:DescribeInstanceInformation` |
+| CloudWatch Logs | `logs:CreateLogGroup`, `logs:DeleteLogGroup`, `logs:PutRetentionPolicy`, `logs:DescribeLogGroups` |
+
+> **Tip:** The easiest way to grant these is to attach `AdministratorAccess` to the deploying identity in a non-production account. For production, scope down using the table above.
 
 ## Deployment
 

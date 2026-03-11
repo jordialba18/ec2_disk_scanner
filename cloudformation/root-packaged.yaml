@@ -65,7 +65,7 @@ Resources:
     - VPCStack
     - IAMStack
     Properties:
-      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/01355c0105d96b2b71ea36da6834c586.template
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/689cfac033d8674da743371caccbb62e.template
       Parameters:
         StackPrefix:
           Ref: AWS::StackName
@@ -97,7 +97,7 @@ Resources:
     - VPCStack
     - ScannerStack
     Properties:
-      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/6ebcd0d49753881cf72cd7cff9b3a138.template
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/0d1bc2b85d32f2d916e7185a5bc087a6.template
       Parameters:
         StackPrefix:
           Ref: AWS::StackName
