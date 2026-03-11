@@ -246,7 +246,14 @@ SCANNER_ASG_NAME=$(aws cloudformation describe-stacks \
 # -----------------------------------------------------------------------
 step "Step 4.5: Uploading scanner image to S3..."
 
-docker save "$SCANNER_IMAGE_URI" | gzip | aws s3 cp - \
+SCANNER_TMPFILE=$(mktemp /tmp/scanner-image-XXXXXX.tar.gz)
+trap 'rm -f "$SCANNER_TMPFILE"' EXIT
+
+echo "    Saving and compressing Docker image (this may take a few minutes)..."
+docker save "$SCANNER_IMAGE_URI" | gzip > "$SCANNER_TMPFILE"
+IMAGE_SIZE=$(du -sh "$SCANNER_TMPFILE" | cut -f1)
+echo "    Compressed image size: ${IMAGE_SIZE} — uploading to S3..."
+aws s3 cp "$SCANNER_TMPFILE" \
     "s3://${RESULTS_BUCKET}/scanner-image/scanner.tar.gz" \
     --region "$AWS_REGION"
 
