@@ -21,7 +21,7 @@ def lambda_handler(event, context):
 
     response = ec2.create_snapshot(
         VolumeId=volume_id,
-        Description=f"YARA scanner snapshot — execution {execution_id}",
+        Description=f"YARA scanner snapshot - execution {execution_id}",
         TagSpecifications=[
             {
                 "ResourceType": "snapshot",
