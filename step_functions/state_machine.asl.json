@@ -6,7 +6,7 @@
       "Type": "Task",
       "Resource": "${ListVolumesFunctionArn}",
       "Parameters": {
-        "execution_id.$": "$$.Execution.Id"
+        "execution_id.$": "$$.Execution.Name"
       },
       "ResultPath": "$.list_result",
       "Next": "CreateSnapshots",
@@ -24,7 +24,7 @@
       "ItemsPath": "$.list_result.volumes",
       "ItemSelector": {
         "volume_id.$": "$$.Map.Item.Value.volume_id",
-        "execution_id.$": "$$.Execution.Id"
+        "execution_id.$": "$$.Execution.Name"
       },
       "MaxConcurrency": 0,
       "Iterator": {
@@ -56,7 +56,7 @@
         "Payload": {
           "task_token.$": "$$.Task.Token",
           "snapshots.$": "$.snapshots",
-          "execution_id.$": "$$.Execution.Id"
+          "execution_id.$": "$$.Execution.Name"
         }
       },
       "HeartbeatSeconds": 900,
@@ -78,7 +78,7 @@
       "ItemSelector": {
         "snapshot_id.$": "$$.Map.Item.Value.snapshot_id",
         "volume_id.$": "$$.Map.Item.Value.volume_id",
-        "execution_id.$": "$$.Execution.Id"
+        "execution_id.$": "$$.Execution.Name"
       },
       "MaxConcurrency": 1,
       "Iterator": {
@@ -188,7 +188,7 @@
       "Type": "Task",
       "Resource": "${GenerateReportFunctionArn}",
       "Parameters": {
-        "execution_id.$": "$$.Execution.Id",
+        "execution_id.$": "$$.Execution.Name",
         "scan_results.$": "$.scan_results"
       },
       "Retry": [

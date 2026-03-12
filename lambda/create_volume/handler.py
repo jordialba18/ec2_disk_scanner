@@ -44,9 +44,14 @@ def lambda_handler(event, context):
     )
 
     scan_volume_id = response["VolumeId"]
-    logger.info(
-        "Created scan volume %s from snapshot %s", scan_volume_id, snapshot_id
+    logger.info("Created scan volume %s, waiting for it to become available...", scan_volume_id)
+
+    waiter = ec2.get_waiter("volume_available")
+    waiter.wait(
+        VolumeIds=[scan_volume_id],
+        WaiterConfig={"Delay": 5, "MaxAttempts": 60},  # up to 5 minutes
     )
+    logger.info("Scan volume %s is now available", scan_volume_id)
 
     return {
         "scan_volume_id": scan_volume_id,

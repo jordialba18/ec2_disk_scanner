@@ -320,7 +320,7 @@ Resources:
               "Parameters": {
                 "FunctionName": "${TriggerScanFunction.Arn}",
                 "Payload": {
-                  "execution_id.$": "$$.Execution.Id",
+                  "execution_id.$": "$$.Execution.Name",
                   "action": "list_volumes"
                 }
               },
@@ -343,7 +343,7 @@ Resources:
               "ItemsPath": "$.list_result.volumes",
               "ItemSelector": {
                 "volume_id.$": "$$.Map.Item.Value.volume_id",
-                "execution_id.$": "$$.Execution.Id"
+                "execution_id.$": "$$.Execution.Name"
               },
               "MaxConcurrency": 0,
               "Iterator": {
@@ -384,7 +384,7 @@ Resources:
                 "Payload": {
                   "task_token.$": "$$.Task.Token",
                   "snapshots.$": "$.snapshots",
-                  "execution_id.$": "$$.Execution.Id"
+                  "execution_id.$": "$$.Execution.Name"
                 }
               },
               "HeartbeatSeconds": 900,
@@ -398,7 +398,7 @@ Resources:
               "ItemSelector": {
                 "snapshot_id.$": "$$.Map.Item.Value.snapshot_id",
                 "volume_id.$": "$$.Map.Item.Value.volume_id",
-                "execution_id.$": "$$.Execution.Id"
+                "execution_id.$": "$$.Execution.Name"
               },
               "MaxConcurrency": 1,
               "Iterator": {
@@ -551,7 +551,7 @@ Resources:
               "Parameters": {
                 "FunctionName": "${GenerateReportFunction.Arn}",
                 "Payload": {
-                  "execution_id.$": "$$.Execution.Id",
+                  "execution_id.$": "$$.Execution.Name",
                   "scan_results.$": "$.scan_results"
                 }
               },
