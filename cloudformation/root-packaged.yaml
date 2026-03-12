@@ -26,7 +26,7 @@ Resources:
   VPCStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/708b4a028f4e855e177e8401e3112b38.template
+      TemplateURL: https://s3.eu-north-1.amazonaws.com/hatzil-output-bucket/cfn/59c6d6fabd3654823198db5538ac38b1.template
       TimeoutInMinutes: 30
       Tags:
       - Key: ManagedBy

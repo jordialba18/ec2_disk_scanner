@@ -92,7 +92,7 @@ Resources:
       RouteTableIds:
         - !Ref PrivateRouteTable
 
-  # Scanner security group — no inbound, outbound HTTPS only
+  # Scanner security group — outbound HTTPS only; inbound rule added via ScannerSGSelfIngress
   ScannerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -107,6 +107,17 @@ Resources:
       Tags:
         - Key: Name
           Value: yara-scanner-sg
+
+  # Standalone ingress rule — separate resource to avoid self-referencing circular dependency
+  ScannerSGSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ScannerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref ScannerSecurityGroup
+      Description: "Allow HTTPS from EC2 to VPC endpoint ENIs (SSM/S3)"
 
   # SSM Interface Endpoints — all three required for Run Command
   SSMEndpoint:
