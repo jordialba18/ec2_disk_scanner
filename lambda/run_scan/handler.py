@@ -23,6 +23,7 @@ logger.setLevel(logging.INFO)
 
 ec2 = boto3.client("ec2")
 ssm = boto3.client("ssm")
+lambda_client = boto3.client("lambda")
 
 # SSM document for running shell commands
 SSM_DOCUMENT = "AWS-RunShellScript"
@@ -37,6 +38,7 @@ def lambda_handler(event, context):
 
     results_bucket = os.environ["RESULTS_BUCKET"]
     scanner_image_uri = os.environ["SCANNER_IMAGE_URI"]
+    check_scan_status_arn = os.environ["CHECK_SCAN_STATUS_FUNCTION_ARN"]
 
     # Build the scan script with all parameters interpolated server-side
     scan_script = build_scan_script(
@@ -81,9 +83,23 @@ def lambda_handler(event, context):
     command_id = response["Command"]["CommandId"]
     logger.info("SSM command %s sent", command_id)
 
-    # Return command metadata so check_scan_status can poll
-    # check_scan_status is NOT a waitForTaskToken step — it's invoked separately
-    # via the task_token stored in SSM Parameter Store
+    # Asynchronously invoke check_scan_status to poll the SSM command and
+    # complete the task token. This is required because MountAndScan uses
+    # waitForTaskToken — nothing else triggers check_scan_status.
+    lambda_client.invoke(
+        FunctionName=check_scan_status_arn,
+        InvocationType="Event",  # async — fire and forget
+        Payload=json.dumps({
+            "command_id": command_id,
+            "instance_id": instance_id,
+            "scan_volume_id": scan_volume_id,
+            "volume_id": volume_id,
+            "execution_id": execution_id,
+            "task_token_param": param_name,
+        }).encode(),
+    )
+    logger.info("Invoked check_scan_status for command %s", command_id)
+
     return {
         "command_id": command_id,
         "instance_id": instance_id,
@@ -153,9 +169,15 @@ MOUNTED=false
 try_mount() {{
     local dev="$1"
     local opts="$2"
-    if mount -o ro,$opts "$dev" "$MOUNT_POINT" 2>/dev/null; then
+    local mount_opts
+    if [ -n "$opts" ]; then
+        mount_opts="ro,$opts"
+    else
+        mount_opts="ro"
+    fi
+    if mount -o "$mount_opts" "$dev" "$MOUNT_POINT" 2>/dev/null; then
         MOUNTED=true
-        echo "Mounted $dev at $MOUNT_POINT (opts: ro,$opts)"
+        echo "Mounted $dev at $MOUNT_POINT (opts: $mount_opts)"
         return 0
     fi
     return 1
@@ -175,10 +197,13 @@ case "$FS_TYPE" in
         fi
         ;;
     *)
-        # Unknown or no filesystem at raw device — try common types and partition p1
+        # Partition table or unknown FS: try raw device then first partition (p1)
+        # Include norecovery,nouuid for XFS (Amazon Linux 2 default FS)
         try_mount "$DEVICE" "norecovery" || \
+        try_mount "$DEVICE" "norecovery,nouuid" || \
         try_mount "$DEVICE" "" || \
         try_mount "${{DEVICE}}p1" "norecovery" || \
+        try_mount "${{DEVICE}}p1" "norecovery,nouuid" || \
         try_mount "${{DEVICE}}p1" "" || true
         ;;
 esac

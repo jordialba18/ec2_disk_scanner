@@ -230,6 +230,7 @@ Resources:
           SCANNER_AZ: !Ref ScannerAZ
           RESULTS_BUCKET: !Ref ResultsBucketName
           SCANNER_IMAGE_URI: !Ref ScannerImageURI
+          CHECK_SCAN_STATUS_FUNCTION_ARN: !GetAtt CheckScanStatusFunction.Arn
       Tags:
         - Key: ManagedBy
           Value: yara-scanner

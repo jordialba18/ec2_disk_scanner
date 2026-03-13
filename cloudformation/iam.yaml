@@ -70,6 +70,11 @@ Resources:
                   - states:SendTaskSuccess
                   - states:SendTaskFailure
                 Resource: "*"
+              - Sid: LambdaInvokePermissions
+                Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
               - Sid: LogsPermissions
                 Effect: Allow
                 Action:
